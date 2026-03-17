@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Eduparse | An Educational Parser Tool</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <header class="navbar">
+            <div class="logo">Eduparse</div>
+            <div class="tagline">Bottom-up parsers(SLR,CLR etc.)</div>
+        </header>
+
+        <div class="main-layout">
+            <aside class="sidebar">
+                <div class="input-card">
+                    <h4>Grammar Input</h4>
+                    <p class="hint">Format of the Grammar: E -> E + T | T</p>
+                    <textarea id="GrammarInput">E -> E + T | T 
+T -> id</textarea>
+                    <label>Parser choice:</label>
+                    <select id="ParserChoice">
+                        <option value="SLR">SLR Parser</option>
+                        <option value="CLR">CLR Parser</option>
+                        <option value="lalr">LALR Parser(Coming Soon)</option>
+                    </select><br>
+
+                    <label>String(Test):</label><br>
+                    <input type="text" id="StringInput" value="id + id">
+
+
+                    <button id="runbtn" class="btn-primary">Generate and start Parsing</button>
+                    <button id="clearbtn" class="btn-danger">Clear All</button>
+                </div>
+            </aside>
+
+            <main class="content">
+                <div id="results" style="display: none;">
+                    <section class="card">
+                        <h4>Grammar with Augmentation & Sets</h4>
+                        <div class="flex-row">
+                            <div id="AugGrammar" class="flex-item"></div>
+                            <div id="SetsTable" class="flex-item scrollable"></div>
+                        </div>
+                    </section>
+                    <section class="card">
+                        <h4>Canonical Collection of Items</h4>
+                        <div id="ItemSetsDisplay" class="scrollable" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px;">
+                            </div>
+                    </section>
+                    <section class="card">
+                        <h4>Parsing Table</h4>
+                        <div id="TableDisplay" class="scrollable"></div>
+                    </section>
+
+                    <section class="card">
+                        <h4>String Parsing</h4>
+                        <div id="TraceDisplay" class="scrollable"></div>
+                    </section>
+
+                    <section class="card">
+                        <h4>Parse Tree</h4>
+                        <div id="TreeDisplay" class="tree-container scrollable"></div>
+                        </section>
+                </div>
+
+                <div id="emptystate" class="empty-message">
+                    <p>Enter a grammar and click "Generate and start Parsing"</p>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <script src="js/parser-engine.js"></script>
+    <script src="js/visualizer.js"></script>
+    <script src="js/logic.js"></script>
+
+</body>
+</html> 
