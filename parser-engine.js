@@ -1,222 +1,726 @@
 class ParserEngine {
-    constructor(grammarStr, parserType) {
-        this.type = parserType;
+    constructor(grammarStr, parserType = "slr1") {
+        this.grammarStr = grammarStr;
+        this.parserType = parserType;
+
         this.prods = [];
-        this.nonTerms = new Set();
-        this.terms = new Set();
+        this.displayProds = [];
+        this.nonTerms = [];
+        this.terms = [];
         this.first = {};
         this.follow = {};
         this.states = [];
+        this.gotoMap = {};
         this.table = {};
-        this.init(grammarStr);
-    }
+        this.startSymbol = "";
+        this.augmentedStart = "";
+        this.augIndex = -1;
+        this.conflicts = [];
+        this.isAmbiguous = false;
 
-    init(str) {
-        const lines = str.trim().split('\n');
-        const firstHead = lines[0].split('->')[0].trim();
-
-        //Augmented grammar
-        this.prods.push({ head: firstHead + "'", body: [firstHead] });
-        this.nonTerms.add(firstHead + "'");
-
-        lines.forEach(line => {
-            const [head, bodystr] = line.split('->').map(s => s.trim());
-            this.nonTerms.add(head);
-            bodystr.split('|').forEach(b => {
-                const symbols = b.trim().split(/\s+/);
-                this.prods.push({ head, body: symbols });
-                symbols.forEach(s => {
-                    if (!s.match(/^[A-Z]/)) this.terms.add(s);
-                    else this.nonTerms.add(s);
-                });
-            });
-        });
-        this.terms.add('$'); 
+        this.parseGrammar();
         this.computeFirst();
         this.computeFollow();
     }
 
+    parseGrammar() {
+        const lines = this.grammarStr
+            .split("\n")
+            .map(line => line.trim())
+            .filter(line => line.length > 0);
+
+        lines.forEach((line, index) => {
+            const parts = line.split("->");
+            if (parts.length !== 2) return;
+
+            const head = parts[0].trim();
+
+            if (index === 0) {
+                this.startSymbol = head;
+            }
+
+            if (!this.nonTerms.includes(head)) {
+                this.nonTerms.push(head);
+            }
+        });
+
+        this.augmentedStart = this.startSymbol + "'";
+
+        if (!this.nonTerms.includes(this.augmentedStart)) {
+            this.nonTerms.unshift(this.augmentedStart);
+        }
+
+        // Original productions in exact user-written order
+        lines.forEach(line => {
+            const parts = line.split("->");
+            if (parts.length !== 2) return;
+
+            const head = parts[0].trim();
+            const alternatives = parts[1].split("|");
+
+            alternatives.forEach(alt => {
+                const trimmed = alt.trim();
+                let tokens = [];
+
+                if (trimmed === "" || trimmed === "ε") {
+                    tokens = ["ε"];
+                } else {
+                    tokens = trimmed.split(/\s+/);
+                }
+
+                this.prods.push({
+                    head: head,
+                    body: tokens
+                });
+            });
+        });
+
+        // Save display order before adding augmented production
+        this.displayProds = this.prods.map(p => ({
+            head: p.head,
+            body: [...p.body]
+        }));
+
+        // Add augmented production at the end internally
+        this.augIndex = this.prods.length;
+        this.prods.push({
+            head: this.augmentedStart,
+            body: [this.startSymbol]
+        });
+
+        this.prods.forEach(prod => {
+            prod.body.forEach(sym => {
+                if (
+                    sym !== "ε" &&
+                    !this.nonTerms.includes(sym) &&
+                    !this.terms.includes(sym)
+                ) {
+                    this.terms.push(sym);
+                }
+            });
+        });
+
+        if (!this.terms.includes("$")) {
+            this.terms.push("$");
+        }
+    }
+
     computeFirst() {
-        this.nonTerms.forEach(nt => this.first[nt] = new Set());
+        this.first = {};
+
+        [...this.nonTerms, ...this.terms, "ε"].forEach(sym => {
+            this.first[sym] = new Set();
+        });
+
+        this.terms.forEach(t => {
+            this.first[t].add(t);
+        });
+
+        this.first["ε"].add("ε");
+
         let changed = true;
+
         while (changed) {
             changed = false;
-            this.prods.forEach(p => {
-                let beforesize = this.first[p.head].size;
-                let firstSym = p.body[0];
-                if (!this.nonTerms.has(firstSym)) {
-                    this.first[p.head].add(firstSym);
-                } else {
-                    this.first[firstSym].forEach(f => this.first[p.head].add(f));
+
+            this.prods.forEach(prod => {
+                const head = prod.head;
+                const body = prod.body;
+
+                if (!this.first[head]) {
+                    this.first[head] = new Set();
                 }
-                if (this.first[p.head].size > beforesize) changed = true;
-            
+
+                if (body.length === 1 && body[0] === "ε") {
+                    if (!this.first[head].has("ε")) {
+                        this.first[head].add("ε");
+                        changed = true;
+                    }
+                    return;
+                }
+
+                let nullable = true;
+
+                for (let i = 0; i < body.length; i++) {
+                    const symbol = body[i];
+
+                    if (!this.first[symbol]) {
+                        this.first[symbol] = new Set();
+                    }
+
+                    this.first[symbol].forEach(val => {
+                        if (val !== "ε" && !this.first[head].has(val)) {
+                            this.first[head].add(val);
+                            changed = true;
+                        }
+                    });
+
+                    if (!this.first[symbol].has("ε")) {
+                        nullable = false;
+                        break;
+                    }
+                }
+
+                if (nullable) {
+                    if (!this.first[head].has("ε")) {
+                        this.first[head].add("ε");
+                        changed = true;
+                    }
+                }
             });
         }
     }
 
     computeFollow() {
-        this.nonTerms.forEach(nt => this.follow[nt] = new Set());
-        this.follow[this.prods[0].head].add('$');
+        this.follow = {};
+
+        this.nonTerms.forEach(nt => {
+            this.follow[nt] = new Set();
+        });
+
+        this.follow[this.startSymbol].add("$");
+        this.follow[this.augmentedStart].add("$");
+
         let changed = true;
+
         while (changed) {
             changed = false;
-            this.prods.forEach(p => {
-                for (let i = 0; i < p.body.length; i++) {
-                    let B = p.body[i];
-                    if (this.nonTerms.has(B)) {
-                        let beforesize = this.follow[B].size;
-                        let next = p.body[i + 1];
-                        if (next) {
-                            if (!this.nonTerms.has(next)) this.follow[B].add(next);
-                            else this.first[next].forEach(f => this.follow[B].add(f));
-                        } else {
-                            this.follow[p.head].forEach(f => this.follow[B].add(f));
-                        } 
-                        if (this.follow[B].size > beforesize) changed = true;
+
+            this.prods.forEach(prod => {
+                const head = prod.head;
+                const body = prod.body;
+
+                if (!this.follow[head]) {
+                    this.follow[head] = new Set();
+                }
+
+                for (let i = 0; i < body.length; i++) {
+                    const B = body[i];
+
+                    if (!this.nonTerms.includes(B)) continue;
+
+                    let nullableSuffix = true;
+
+                    for (let j = i + 1; j < body.length; j++) {
+                        const next = body[j];
+
+                        if (!this.first[next]) {
+                            this.first[next] = new Set();
+                        }
+
+                        this.first[next].forEach(val => {
+                            if (val !== "ε" && !this.follow[B].has(val)) {
+                                this.follow[B].add(val);
+                                changed = true;
+                            }
+                        });
+
+                        if (!this.first[next].has("ε")) {
+                            nullableSuffix = false;
+                            break;
+                        }
+                    }
+
+                    if (i === body.length - 1 || nullableSuffix) {
+                        this.follow[head].forEach(val => {
+                            if (!this.follow[B].has(val)) {
+                                this.follow[B].add(val);
+                                changed = true;
+                            }
+                        });
                     }
                 }
             });
         }
     }
 
-    getSLRClosure(items) {
-        let closure = [...items];
-        let changed = true;
-        while (changed) {
-            changed = false;
-            closure.forEach(item => {
-                let B = item.body[item.dot];
-                if (this.nonTerms.has(B)) {
-                    this.prods.forEach((p, idx) => {
-                        if (p.head === B && !closure.some(c => c.pIdx === idx && c.dot === 0)) {
-                            closure.push({pIdx: idx, head: p.head, body: p.body, dot: 0 });
-                            changed = true;
-                        }
-                    });
+    firstOfSequence(sequence, lookahead = "$") {
+        let result = new Set();
+
+        if (!sequence || sequence.length === 0) {
+            result.add(lookahead);
+            return result;
+        }
+
+        let nullable = true;
+
+        for (let i = 0; i < sequence.length; i++) {
+            const symbol = sequence[i];
+
+            if (!this.first[symbol]) {
+                this.first[symbol] = new Set();
+            }
+
+            this.first[symbol].forEach(val => {
+                if (val !== "ε") {
+                    result.add(val);
                 }
             });
+
+            if (!this.first[symbol].has("ε")) {
+                nullable = false;
+                break;
+            }
         }
-        return closure;
+
+        if (nullable) {
+            result.add(lookahead);
+        }
+
+        return result;
     }
 
-    getCLRClosure(items) {
+    getClosure(items) {
         let closure = [...items];
         let changed = true;
+
         while (changed) {
             changed = false;
-            for (let i = 0; i < closure.length; i++) {
-                let item = closure[i];
-                let B = item.body[item.dot];
-                if (this.nonTerms.has(B)) {
-                    let beta = item.body.slice(item.dot + 1);
-                    let lookaheads = new Set();
-                    if (beta.length > 0) {
-                        let firstBeta = !this.nonTerms.has(beta[0]) ? new Set([beta[0]]) : this.first[beta[0]];
-                        firstBeta.forEach(la => lookaheads.add(la));
-                    } else {
-                        lookaheads.add(item.lookahead);
 
-                    }
+            for (let k = 0; k < closure.length; k++) {
+                const item = closure[k];
+                const prod = this.prods[item.pIdx];
+                const symbol = prod.body[item.dot];
+
+                if (this.nonTerms.includes(symbol)) {
                     this.prods.forEach((p, idx) => {
-                        if (p.head === B) {
-                            lookaheads.forEach(la => {
-                                if (!closure.some(c => c.pIdx === idx && c.dot === 0 && c.lookahead === la)) {
-                                    closure.push({ pIdx: idx, head: p.head, body: p.body, dot: 0, lookahead: la });
-                                    changed = true;
-                                }
-                            });
+                        if (p.head !== symbol) return;
+
+                        let lookaheads = new Set(["$"]);
+
+                        if (this.parserType === "clr1" || this.parserType === "lalr1") {
+                            const beta = prod.body.slice(item.dot + 1);
+                            lookaheads = this.firstOfSequence(beta, item.lookahead || "$");
                         }
+
+                        lookaheads.forEach(la => {
+                            const newItem = {
+                                pIdx: idx,
+                                dot: 0,
+                                lookahead: (this.parserType === "clr1" || this.parserType === "lalr1") ? la : undefined
+                            };
+
+                            const exists = closure.some(c =>
+                                c.pIdx === newItem.pIdx &&
+                                c.dot === newItem.dot &&
+                                c.lookahead === newItem.lookahead
+                            );
+
+                            if (!exists) {
+                                closure.push(newItem);
+                                changed = true;
+                            }
+                        });
                     });
                 }
             }
         }
+
         return closure;
+    }
+
+    goto(items, symbol) {
+        let moved = [];
+
+        items.forEach(item => {
+            const prod = this.prods[item.pIdx];
+
+            if (prod.body[item.dot] === symbol) {
+                moved.push({
+                    pIdx: item.pIdx,
+                    dot: item.dot + 1,
+                    lookahead: item.lookahead
+                });
+            }
+        });
+
+        if (moved.length === 0) return [];
+        return this.getClosure(moved);
+    }
+
+    sameState(a, b) {
+        if (a.length !== b.length) return false;
+
+        return a.every(itemA =>
+            b.some(itemB =>
+                itemA.pIdx === itemB.pIdx &&
+                itemA.dot === itemB.dot &&
+                itemA.lookahead === itemB.lookahead
+            )
+        );
+    }
+
+    sameCore(a, b) {
+        if (a.length !== b.length) return false;
+
+        return a.every(itemA =>
+            b.some(itemB =>
+                itemA.pIdx === itemB.pIdx &&
+                itemA.dot === itemB.dot
+            )
+        );
+    }
+
+    findAcceptState() {
+        for (let i = 0; i < this.states.length; i++) {
+            const state = this.states[i];
+
+            for (let j = 0; j < state.length; j++) {
+                const item = state[j];
+                const prod = this.prods[item.pIdx];
+
+                if (
+                    item.pIdx === this.augIndex &&
+                    prod.head === this.augmentedStart &&
+                    prod.body.length === 1 &&
+                    prod.body[0] === this.startSymbol &&
+                    item.dot === 1
+                ) {
+                    return i;
+                }
+            }
+        }
+        return -1;
+    }
+
+    forceAcceptStateToOne() {
+        const acceptIndex = this.findAcceptState();
+
+        if (acceptIndex === -1 || acceptIndex === 1 || this.states.length < 2) {
+            return;
+        }
+
+        let order = [];
+        for (let i = 0; i < this.states.length; i++) {
+            order.push(i);
+        }
+
+        const temp = order[1];
+        order[1] = order[acceptIndex];
+        order[acceptIndex] = temp;
+
+        let oldToNew = {};
+        for (let newIndex = 0; newIndex < order.length; newIndex++) {
+            oldToNew[order[newIndex]] = newIndex;
+        }
+
+        let newStates = new Array(this.states.length);
+        for (let oldIndex = 0; oldIndex < this.states.length; oldIndex++) {
+            const newIndex = oldToNew[oldIndex];
+            newStates[newIndex] = this.states[oldIndex];
+        }
+
+        let newGotoMap = {};
+        for (let key in this.gotoMap) {
+            const parts = key.split("_");
+            const oldFrom = parseInt(parts[0]);
+            const symbol = parts.slice(1).join("_");
+            const oldTo = this.gotoMap[key];
+
+            const newFrom = oldToNew[oldFrom];
+            const newTo = oldToNew[oldTo];
+
+            newGotoMap[`${newFrom}_${symbol}`] = newTo;
+        }
+
+        this.states = newStates;
+        this.gotoMap = newGotoMap;
+    }
+
+    buildStates() {
+        this.states = [];
+        this.gotoMap = {};
+
+        const startItem = {
+            pIdx: this.augIndex,
+            dot: 0,
+            lookahead: (this.parserType === "clr1" || this.parserType === "lalr1") ? "$" : undefined
+        };
+
+        const startState = this.getClosure([startItem]);
+        this.states.push(startState);
+
+        for (let i = 0; i < this.states.length; i++) {
+            const state = this.states[i];
+            const symbols = [...this.terms.filter(t => t !== "$"), ...this.nonTerms];
+
+            symbols.forEach(sym => {
+                const nextState = this.goto(state, sym);
+
+                if (nextState.length === 0) return;
+
+                let existingIndex = this.states.findIndex(s => this.sameState(s, nextState));
+
+                if (existingIndex === -1) {
+                    this.states.push(nextState);
+                    existingIndex = this.states.length - 1;
+                }
+
+                this.gotoMap[`${i}_${sym}`] = existingIndex;
+            });
+        }
+
+        if (this.parserType === "lalr1") {
+            this.mergeLALRStates();
+        }
+
+        this.forceAcceptStateToOne();
+    }
+
+    mergeLALRStates() {
+        let groups = [];
+        let stateToGroup = new Array(this.states.length).fill(-1);
+
+        for (let i = 0; i < this.states.length; i++) {
+            let found = -1;
+
+            for (let g = 0; g < groups.length; g++) {
+                if (this.sameCore(this.states[i], groups[g][0])) {
+                    found = g;
+                    break;
+                }
+            }
+
+            if (found === -1) {
+                groups.push([this.states[i]]);
+                stateToGroup[i] = groups.length - 1;
+            } else {
+                groups[found].push(this.states[i]);
+                stateToGroup[i] = found;
+            }
+        }
+
+        let mergedStates = groups.map(group => {
+            let combined = [];
+
+            group.forEach(state => {
+                state.forEach(item => {
+                    const exists = combined.some(c =>
+                        c.pIdx === item.pIdx &&
+                        c.dot === item.dot &&
+                        c.lookahead === item.lookahead
+                    );
+
+                    if (!exists) {
+                        combined.push({ ...item });
+                    }
+                });
+            });
+
+            return combined;
+        });
+
+        let newGotoMap = {};
+
+        for (let oldKey in this.gotoMap) {
+            const parts = oldKey.split("_");
+            const oldFrom = parseInt(parts[0]);
+            const sym = parts.slice(1).join("_");
+            const oldTo = this.gotoMap[oldKey];
+
+            const newFrom = stateToGroup[oldFrom];
+            const newTo = stateToGroup[oldTo];
+
+            newGotoMap[`${newFrom}_${sym}`] = newTo;
+        }
+
+        this.states = mergedStates;
+        this.gotoMap = newGotoMap;
+    }
+
+    recordConflict(state, symbol, oldAction, newAction) {
+        let type = "Unknown";
+
+        if (
+            (oldAction.startsWith("s") && newAction.startsWith("r")) ||
+            (oldAction.startsWith("r") && newAction.startsWith("s"))
+        ) {
+            type = "Shift-Reduce";
+        } else if (
+            oldAction.startsWith("r") && newAction.startsWith("r")
+        ) {
+            type = "Reduce-Reduce";
+        }
+
+        this.conflicts.push({
+            state,
+            symbol,
+            oldAction,
+            newAction,
+            type
+        });
+
+        this.isAmbiguous = true;
     }
 
     buildtable() {
-        let i0;
-        if (this.type === "SLR") {
-            i0 = this.getSLRClosure([{ pIdx: 0, head: this.prods[0].head, body: this.prods[0].body, dot: 0 }]);
-        }
-        else {
-            i0 = this.getCLRClosure([{ pIdx: 0, head: this.prods[0].head, body: this.prods[0].body, dot: 0, lookahead: '$' }]);
-        }
-        this.states.push(i0);
+        this.conflicts = [];
+        this.isAmbiguous = false;
+        this.table = {};
 
-        for (let i = 0; i < this.states.length; i++) {
+        this.buildStates();
+
+        this.states.forEach((state, i) => {
             this.table[i] = {};
-            [...this.terms, ...this.nonTerms].forEach(sym => {
-                let moved = []
-                this.states[i].forEach(item => {
-                    if (item.body[item.dot] === sym) {
-                        moved.push({ ...item, dot: item.dot + 1 });
+        });
+
+        this.states.forEach((state, i) => {
+            state.forEach(item => {
+                const prod = this.prods[item.pIdx];
+                const nextSym = prod.body[item.dot];
+
+                if (nextSym && this.terms.includes(nextSym) && nextSym !== "$") {
+                    const toState = this.gotoMap[`${i}_${nextSym}`];
+
+                    if (toState !== undefined) {
+                        const action = "s" + toState;
+
+                        if (this.table[i][nextSym] && this.table[i][nextSym] !== action) {
+                            this.recordConflict(i, nextSym, this.table[i][nextSym], action);
+                        } else {
+                            this.table[i][nextSym] = action;
+                        }
                     }
-                });
-                if (moved.length > 0) {
-                    let next = (this.type === "SLR") ? this.getSLRClosure(moved) : this.getCLRClosure(moved);
-                    let idx = this.states.findIndex(s => JSON.stringify(s) === JSON.stringify(next));
-                    if (idx === -1) {
-                        idx = this.states.length;
-                        this.states.push(next);
+                }
+
+                const isEpsilonProd = (prod.body.length === 1 && prod.body[0] === "ε");
+                const isComplete = item.dot === prod.body.length || isEpsilonProd;
+
+                if (isComplete) {
+                    if (item.pIdx === this.augIndex) {
+                        this.table[i]["$"] = "acc";
+                    } else {
+                        let reduceSymbols = [];
+
+                        if (this.parserType === "lr0") {
+                            reduceSymbols = this.terms;
+                        } else if (this.parserType === "clr1" || this.parserType === "lalr1") {
+                            reduceSymbols = [item.lookahead || "$"];
+                        } else {
+                            reduceSymbols = [...this.follow[prod.head]];
+                        }
+
+                        reduceSymbols.forEach(sym => {
+                            const action = "r" + item.pIdx;
+
+                            if (this.table[i][sym] && this.table[i][sym] !== action) {
+                                this.recordConflict(i, sym, this.table[i][sym], action);
+                            } else {
+                                this.table[i][sym] = action;
+                            }
+                        });
                     }
-                    this.table[i][sym] = this.terms.has(sym) ? "s" + idx : idx;
                 }
             });
 
-            this.states[i].forEach(item => {
-                if (item.dot === item.body.length) {
-                    if (item.pIdx === 0) {
-                        this.table[i]['$'] = 'acc';
-                    } else if (this.type === "SLR") {
-                        this.follow[item.head].forEach(t => this.table[i][t] = "r" + item.pIdx);
-                    } else {
-                        this.table[i][item.lookahead] = "r" + item.pIdx;
-                    }
+            this.nonTerms.forEach(nt => {
+                if (nt === this.augmentedStart) return;
+
+                const toState = this.gotoMap[`${i}_${nt}`];
+                if (toState !== undefined) {
+                    this.table[i][nt] = toState;
                 }
             });
-        }
+        });
     }
 
-    parsestringandbuildtree(inputstr) {
-        const tokens = inputstr.trim().split(/\s+/).concat('$');
+    parsestringandbuildtree(input) {
+        if (this.conflicts.length > 0) {
+            return {
+                accepted: false,
+                error: "Parsing stopped because grammar contains conflicts.",
+                conflicts: this.conflicts,
+                trace: [],
+                tree: null
+            };
+        }
+
+        const tokens = input.trim().length ? input.trim().split(/\s+/) : [];
+        tokens.push("$");
+
         let stack = [0];
-        let nodestack = [];
-        let i = 0;
         let trace = [];
-        
+        let nodeStack = [];
 
         while (true) {
-            let state = stack[stack.length - 1];
-            let sym = tokens[i];
-            let action = this.table[state] ? this.table[state][sym] : null;
-            if (!action) throw new Error(`Syntax error at "${sym}"`);
-            if (action === 'acc') {
-                trace.push([stack.join(' '), tokens.slice(i).join(' '), "Accept"]);
-                return { tree: nodestack, trace: trace };
-            }
-            if (typeof action === 'string' && action.startsWith('s')) {
-                let nextState = parseInt(action.substring(1));
-                trace.push([stack.join(' '), tokens.slice(i).join(' '), "Shift" + nextState]);
-                stack.push(sym, nextState);
-                nodestack.push({ name: sym, children: [] });
-                i++;
+            const state = stack[stack.length - 1];
+            const current = tokens[0];
+            const action = this.table[state] ? this.table[state][current] : undefined;
+
+            trace.push([
+                stack.join(" "),
+                tokens.join(" "),
+                action || "error"
+            ]);
+
+            if (!action) {
+                return {
+                    accepted: false,
+                    error: "Invalid string",
+                    trace,
+                    tree: null
+                };
             }
 
-            else if (typeof action === 'string' && action.startsWith('r')) {
-                let pIdx = parseInt(action.substring(1));
-                let p = this.prods[pIdx];
-                trace.push([stack.join(' '), tokens.slice(i).join(' '), `reduce by ${p.head} → ${p.body.join(' ')}`]);
+            if (action === "acc") {
+                return {
+                    accepted: true,
+                    trace,
+                    tree: nodeStack.length > 0 ? nodeStack[0] : null
+                };
+            }
+
+            if (action.startsWith("s")) {
+                const nextState = parseInt(action.slice(1));
+
+                nodeStack.push({
+                    name: current,
+                    children: []
+                });
+
+                stack.push(current);
+                stack.push(nextState);
+                tokens.shift();
+            } else if (action.startsWith("r")) {
+                const prodIndex = parseInt(action.slice(1));
+                const prod = this.prods[prodIndex];
+
                 let children = [];
-                for (let j = 0 ; j < p.body.length ; j++) {
-                    stack.pop(); stack.pop()
-                    children.unshift(nodestack.pop());
+
+                if (!(prod.body.length === 1 && prod.body[0] === "ε")) {
+                    for (let i = 0; i < prod.body.length; i++) {
+                        stack.pop();
+                        stack.pop();
+                        children.unshift(nodeStack.pop());
+                    }
+                } else {
+                    children.push({
+                        name: "ε",
+                        children: []
+                    });
                 }
-                let prevState = stack[stack.length - 1];
-                stack.push(p.head, this.table[prevState][p.head]);
-                nodestack.push({ name: p.head, children: children });
+
+                const newNode = {
+                    name: prod.head,
+                    children: children
+                };
+
+                const topState = stack[stack.length - 1];
+                const gotoState = this.table[topState][prod.head];
+
+                if (gotoState === undefined) {
+                    return {
+                        accepted: false,
+                        error: "Goto state missing after reduction",
+                        trace,
+                        tree: null
+                    };
+                }
+
+                stack.push(prod.head);
+                stack.push(gotoState);
+                nodeStack.push(newNode);
             }
         }
     }
-
 }
