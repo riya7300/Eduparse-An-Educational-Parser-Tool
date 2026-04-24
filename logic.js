@@ -66,4 +66,4 @@ function showSection(index) {
 
 document.getElementById("clearbtn").addEventListener("click", () => {
     location.reload();
-});
+});  
