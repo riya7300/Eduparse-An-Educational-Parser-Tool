@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>About Eduparse</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        .page-content {
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 30px;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        .page-content h1 {
+            color: var(--primary);
+            margin-bottom: 20px;
+        }
+        .page-content p {
+            line-height: 1.6;
+            color: #444;
+            margin-bottom: 30px;
+            font-size: 1.1em;
+        }
+        .nav-buttons {
+            display: flex;
+            justify-content: flex-end;
+            margin-top: 20px;
+        }
+        .btn-next {
+            padding: 12px 25px;
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            text-decoration: none;
+        }
+        .btn-next:hover {
+            opacity: 0.9;
+        }
+    </style>
+</head>
+<body style="overflow: auto; background: #f4f7f6;">
+    <div class="app-container">
+        <header class="navbar">
+            <div class="logo">Eduparse</div>
+            <div class="tagline">An Educational Parser Tool</div>
+        </header>
+
+        <main class="page-content">
+            <h1>Welcome to Eduparse</h1>
+            <p>
+                Eduparse is a comprehensive educational tool designed to help students and developers understand the inner workings of LR parsing. 
+                Whether you're studying for an exam or building a compiler, Eduparse provides visual insights into how different parsing algorithms process context-free grammars.
+            </p>
+            
+            <div class="parser-descriptions" style="text-align: left; margin-top: 30px;">
+                <div class="parser-item" style="margin-bottom: 20px; padding: 15px; border-radius: 8px; background: #f9f9f9; border-left: 5px solid var(--primary);">
+                    <h3 style="margin-top: 0; color: var(--primary);">LR(0) - Left-to-Right, Rightmost Derivation In Reverse (0 Lookahead)</h3>
+                    <p style="font-size: 0.95em; margin-bottom: 0;">The simplest form of LR parsing. It constructs a state machine based on "items" but doesn't use any lookahead symbols to decide between shifting or reducing. It's often too restrictive for complex languages.</p>
+                </div>
+
+                <div class="parser-item" style="margin-bottom: 20px; padding: 15px; border-radius: 8px; background: #f9f9f9; border-left: 5px solid var(--primary);">
+                    <h3 style="margin-top: 0; color: var(--primary);">SLR(1) - Simple LR (1 Lookahead)</h3>
+                    <p style="font-size: 0.95em; margin-bottom: 0;">An improvement over LR(0) that uses the <strong>FOLLOW set</strong> of a non-terminal to decide when to perform a reduction. This helps resolve many shift-reduce conflicts found in LR(0).</p>
+                </div>
+
+                <div class="parser-item" style="margin-bottom: 20px; padding: 15px; border-radius: 8px; background: #f9f9f9; border-left: 5px solid var(--primary);">
+                    <h3 style="margin-top: 0; color: var(--primary);">CLR(1) - Canonical LR (1 Lookahead)</h3>
+                    <p style="font-size: 0.95em; margin-bottom: 0;">The most powerful LR parsing technique. It keeps track of specific lookahead symbols for every item in each state. While highly capable, it often results in very large parsing tables.</p>
+                </div>
+
+                <div class="parser-item" style="margin-bottom: 20px; padding: 15px; border-radius: 8px; background: #f9f9f9; border-left: 5px solid var(--primary);">
+                    <h3 style="margin-top: 0; color: var(--primary);">LALR(1) - Look-Ahead LR (1 Lookahead)</h3>
+                    <p style="font-size: 0.95em; margin-bottom: 0;">The industry standard for parser generators (like Yacc and Bison). It provides a balance by merging states in CLR(1) that have the same core productions, significantly reducing the table size while maintaining most of CLR's power.</p>
+                </div>
+            </div>
+
+            <div class="nav-buttons">
+                <a href="instructions.html" class="btn-next">Next: Instructions</a>
+            </div>
+        </main>
+    </div>
+</body>
+</html>
